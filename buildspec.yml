@@ -7,3 +7,4 @@ phases:
       - pip --version
       - docker --version
       - python --version
+      - failthistest --fail
