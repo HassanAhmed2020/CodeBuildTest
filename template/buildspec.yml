@@ -1,0 +1,43 @@
+version 0.2
+
+env:
+  secrets-manager:
+    RegistryUserName: arn:aws:secretsmanager:xxxxxxxxxxxx
+    RegistryPassword: arn:aws:secretsmanager:xxxxxxxxxxxx
+
+Phases:
+  install:
+    runtime-versions:
+      python: 3.8
+    commands:
+      - printenv
+      - pip3 install --disable-pip-version-check -U cfn-lint      
+    pre_build:
+      commands:
+        - cfn-lint -t stackset_template.yml        
+    build:
+      commands:
+        - |-
+          aws s3 cp stackset_template.yml s3://${ARTIFACT_BUCKET} \
+          --acl bucket-owner-full-control
+          --ss3 aws:kms
+          --sse-kms-key-id ${CODEBUILD_KMS_KEY_ID}
+    post_build:
+      commands:
+        - |-
+          if ["${CODEBUILD_WEBHOOK_TRIGGER}" == "branch/master" -o "${CODEBUILD_SOURCE_VERSION}" == "master"]; then
+            CREDENTIALS=`aws sts assume-role --role-arn "arn:aws:iam:xxxxxxxx:role/masteraccountstacksetRole --role-session-name stackset-update --output text`;
+            export AWS_ACCESS_KEY_ID=`echo $CREDENTIALS` | awk '{print $5}'`;
+            export AWS_SECRET_ACCESS_KEY=`echo $CREDENTIALS` | awk '{print $7}'`;
+            export AWS_SESSION_TOKEN=`echo $CREDENTIALS` | awk '{print $8}'`;
+
+            aws cloudformation update-stack-set \
+              --stack-set-name PROD-STACKSET-TEMPLATE \
+              --description 'Template to create Infra IAM Roles in AWS accounts'
+              --template-url "https://${ARTIFACT_BUCKET}.s3.amazonaws.com/prod_template.yml"
+              --operation-preferences MaxConcurrentPercentage=100 \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM;
+            fi
+  cache:
+    paths:
+      - "/root/.cache/pip/**/*"

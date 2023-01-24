@@ -1,0 +1,133 @@
+# aws cloudformation create-stack --template-body file://CloudFrontTemplateV1-0-1.yaml --stack-name HAtestCloudFrontCloudFormation --capabilities CAPABILITY_NAMED_IAM
+# aws cloudformation delete-stack --stack-name HAtestCloudFrontCloudFormation
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template to deploy a CodeBuild project that updates the CloudFormation StackSet 
+
+Parameters:
+  AppId: 
+    Type: Number 
+    Description: App ID 
+
+  VpcId:
+    Type: "AWS::EC2::VPC::Id"
+    Description: VPC to provision the pipeline and application 
+  RepositoryName: 
+    Type: String 
+    Description: GitHub Enterprise repository name (ex. "Your Project") 
+    Default: "cloudrepo/cf_stackset_prod"
+  BranchName: 
+    Type: String 
+    Default: master 
+    Description: GitHub Enterprise branch name
+  MasterAccountStacksetRole: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED
+    Description: Arn of Stackset role in Master account
+
+  ArtifactBucketName: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED
+    Description: Artifact Bucket Name
+
+  PipelineKMSKey: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED
+    Description: KMS Key to be used for the CodeBuild Project
+    
+  StackSetRepoName: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED  #"https://xxx.xxx.com/${RepositoryName}" 
+    Description: Github Enterprise Repo Name
+
+  SubnetId1ForCodebuild: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED
+    Description: Security Group ID to be used by CodeBuild Project
+
+  SubnetId2ForCodebuild: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED
+    Description: Security Group ID to be used by CodeBuild Project  
+
+
+  SecurityGroupIdForCodebuild: 
+    Type: String 
+    Default: "AddThis" #TO BE ADDED
+    Description: Security Group ID to be used by CodeBuild Project
+
+
+Resources:
+  CodeBuildRole: 
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "codebuild.amazonaws.com"
+            Action: "sts:AssumeRole"
+        ManagedPolicyArns: 
+          - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/CodeBuildPolicy-${AWS::Region}"
+        Policies: 
+          - PolicyName: AssumeCrossRolePolicy
+            PolicyDocument:            
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: "sts:AssumeRole"
+                  Resource: !Ref MasterAccountStacksetRole
+        Tags:
+          - Key: "billing"
+            Value: !Sub "APP-${AppId}"
+
+
+  GithubProject: 
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Artifacts: 
+        Type: NO_ARTIFACTS
+      BadgeEnabled: true 
+      Cache: 
+        Location: !Sub "${ArtifactBucketName}/cache"
+        Modes: 
+          - LOCAL_SOURCE_CACHE 
+          - LOCAL_CUSTOM_CACHE
+        Type: S3 
+      Description: PROD-TEMPLATE Cloudformation Stackset 
+      EncryptionKey: !Ref PipelineKMSKey
+      Environment: 
+        ComputeType: BUILD_GENERAL1_SMALL 
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Type: PLAINTEXT
+            Value: !Ref ArtifactBucketName
+        Image: "aws/codebuild/amazonlinux2-x86_64-standard:3.0"
+        Type: LINUX_CONTAINER 
+      LogsConfig: 
+        CloudWatchLogs:
+          Status: ENABLED 
+      Name: stackset_prod
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Source: 
+        # BuildSpec: !Ref BuildSpec 
+        GitCloneDepth: 1 
+        InsecureSsl: false 
+        Location: !Ref StackSetRepoName
+        # Location: !Sub "https://xxx.xxx.com/${RepositoryName}" 
+        ReportBuildStatus: true 
+        Type: GITHUB_ENTERPRISE 
+      SourceVersion: !Ref BranchName
+      QueuedTimeoutInMinutes: 5
+      Tags:
+        - Key: "billing"
+          Value: !Sub "APP-${AppId}"
+
+      VpcConfig: 
+        SecurityGroupIds:
+          - !Ref SecurityGroupIdForCodebuild
+        Subnets:
+          - !Ref SubnetId1ForCodebuild
+          - !Ref SubnetId2ForCodebuild
+        VpcId: !Ref VpcId
